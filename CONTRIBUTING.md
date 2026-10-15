@@ -469,3 +469,10 @@ For low-level debugging tools and troubleshooting tips, see [docs/how-to-guides/
 - **External contributors**: fork the repo, push to your fork, then open a PR to `VibiumDev/vibium`
 
 See [docs/contributing/local-dev-setup-mac.md](docs/contributing/local-dev-setup-mac.md) for details on the fork-based workflow.
+
+### CI
+
+Every PR runs the full test suite on Linux, macOS, and Windows, for both Chrome
+and Firefox. All of them must pass before a PR can merge, so a change that works
+on your machine can still fail CI on another OS. Running the suite locally on
+one platform (`make test`) is enough before pushing; CI covers the rest.
