@@ -125,7 +125,7 @@ describe('Mouse: page-level input', () => {
 
   test('mouse.wheel() scrolls the page', async () => {
     const vibe = await bro.page();
-    await vibe.go('data:text/html,<body style="margin:0"><div style="height:5000px;background:linear-gradient(red,blue)">Tall</div></body>');
+    await vibe.setContent('<body style="margin:0"><div style="height:5000px;background:linear-gradient(red,blue)">Tall</div></body>');
 
     // Scroll down
     await vibe.mouse.wheel(0, 500);
