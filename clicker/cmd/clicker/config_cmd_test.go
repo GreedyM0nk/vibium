@@ -25,14 +25,7 @@ func TestConfigInitWritesOwnerOnly(t *testing.T) {
 		if _, err := writeConfigTemplate(cmd, tmpl, false); err != nil {
 			t.Fatalf("%s: %v", tmpl.name, err)
 		}
-		path := filepath.Join(dir, "vibium", tmpl.file)
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("%s: %v", tmpl.name, err)
-		}
-		if got := info.Mode().Perm(); got != 0600 {
-			t.Errorf("%s mode = %o, want 600", tmpl.file, got)
-		}
+		assertOwnerOnly(t, filepath.Join(dir, "vibium", tmpl.file))
 	}
 }
 
