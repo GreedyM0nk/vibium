@@ -254,6 +254,10 @@ func GetChromeExecutable() (string, error) {
 // GetChromeExecutableForChannel resolves the executable of a specific
 // channel. An empty channel means the VIBIUM_ENGINE_CHANNEL default.
 func GetChromeExecutableForChannel(channel string) (string, error) {
+	// linux-arm64 has no Chrome for Testing build; use the system browser (#638).
+	if UseSystemChrome() {
+		return SystemChromeExecutable()
+	}
 	dir, err := resolveVersionDir(channel)
 	if err != nil {
 		return "", err
@@ -271,6 +275,9 @@ func GetChromedriverPath() (string, error) {
 // GetChromedriverPathForChannel resolves the chromedriver of a specific
 // channel, from the same version directory as the executable.
 func GetChromedriverPathForChannel(channel string) (string, error) {
+	if UseSystemChrome() {
+		return SystemChromedriverPath()
+	}
 	dir, err := resolveVersionDir(channel)
 	if err != nil {
 		return "", err
