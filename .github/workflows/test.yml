@@ -97,7 +97,7 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # Each suite job runs on all three OSes via the matrix below. The include
+  # Each suite job runs on Linux and macOS via the matrix below. The include
   # entries carry what differs per OS:
   #   cache_root      — where paths.go puts browser downloads on that OS
   #   rollup_native   — npm drops optional native modules for platforms other
@@ -106,8 +106,16 @@ jobs:
   #   display_wrap    — the Python suite's headed tests need a display; only
   #                     Linux runners lack one, so only Linux wraps in xvfb
   #   python_version  — setup-python has no 3.9 build for Apple Silicon, so
-  #                     macOS tests a current Python while Linux and Windows
-  #                     hold the 3.9 floor
+  #                     macOS tests a current Python while Linux holds the
+  #                     3.9 floor
+  #   go_version      — Go emits the LC_UUID load command only from 1.23, and
+  #                     the macOS 26 runner's dyld aborts binaries without it,
+  #                     so macOS builds with current Go while Linux holds the
+  #                     go.mod floor
+  # Windows is not in the matrix yet: its legs need Go test fixes (Unix file
+  # modes, XDG, path separators), Python client binary discovery for
+  # vibium.exe, and a story for Firefox auto-install, which the binary
+  # refuses on Windows.
   chrome:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -115,7 +123,7 @@ jobs:
       # A failing OS is signal about that OS; let the other legs finish.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             cache_root: ~/.cache/vibium
@@ -126,19 +134,10 @@ jobs:
             cache_root: ~/Library/Caches/vibium
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
-          - os: windows-latest
-            cache_root: ~/AppData/Local/vibium
-            rollup_native: '@rollup/rollup-win32-x64-msvc'
-            python_version: '3.9'
+            go_version: stable
     runs-on: ${{ matrix.os }}
     # Backstop only — scripts/timeout.mjs fails a hung suite after 10 min.
-    # Windows runs the suites noticeably slower, so it gets a larger backstop.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
-    defaults:
-      run:
-        # Windows included: the Makefile's recipes and the steps below assume
-        # Unix quoting, and the Makefile already drives Git Bash on Windows.
-        shell: bash
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,15 +146,13 @@ jobs:
           # build and test steps could read it.
           persist-credentials: false
 
-      # Windows runners ship Git Bash but not make; the Makefile expects both
-      # (see docs/contributing/local-dev-setup-x86-windows.md).
-      - name: Install GNU Make
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress --yes
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -244,7 +241,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             cache_root: ~/.cache/vibium
@@ -255,28 +252,22 @@ jobs:
             cache_root: ~/Library/Caches/vibium
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
-          - os: windows-latest
-            cache_root: ~/AppData/Local/vibium
-            rollup_native: '@rollup/rollup-win32-x64-msvc'
-            python_version: '3.9'
+            go_version: stable
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install GNU Make
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress --yes
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -338,7 +329,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             cache_root: ~/.cache/vibium
@@ -349,15 +340,9 @@ jobs:
             cache_root: ~/Library/Caches/vibium
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
-          - os: windows-latest
-            cache_root: ~/AppData/Local/vibium
-            rollup_native: '@rollup/rollup-win32-x64-msvc'
-            python_version: '3.9'
+            go_version: stable
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 30
     env:
       VIBIUM_REQUIRE_FIREFOX: 1
 
@@ -366,13 +351,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install GNU Make
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress --yes
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -453,7 +438,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             cache_root: ~/.cache/vibium
@@ -464,15 +449,9 @@ jobs:
             cache_root: ~/Library/Caches/vibium
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
-          - os: windows-latest
-            cache_root: ~/AppData/Local/vibium
-            rollup_native: '@rollup/rollup-win32-x64-msvc'
-            python_version: '3.9'
+            go_version: stable
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 30
     env:
       VIBIUM_REQUIRE_FIREFOX: 1
 
@@ -481,13 +460,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install GNU Make
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress --yes
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 

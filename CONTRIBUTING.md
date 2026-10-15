@@ -472,7 +472,7 @@ See [docs/contributing/local-dev-setup-mac.md](docs/contributing/local-dev-setup
 
 ### CI
 
-Every PR runs the full test suite on Linux, macOS, and Windows, for both Chrome
-and Firefox. All of them must pass before a PR can merge, so a change that works
+Every PR runs the full test suite on Linux and macOS, for both Chrome and
+Firefox. All of them must pass before a PR can merge, so a change that works
 on your machine can still fail CI on another OS. Running the suite locally on
 one platform (`make test`) is enough before pushing; CI covers the rest.
