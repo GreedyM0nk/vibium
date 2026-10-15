@@ -225,8 +225,11 @@ describe('JS Lifecycle', () => {
   });
 
   // StartOptions.args reaches the launched browser (#640). --user-agent is a
-  // deterministic, observable proof the flag was applied.
-  test('start({ args }) passes flags to the browser', async () => {
+  // deterministic, observable proof the flag was applied, but only Chrome
+  // honors it as a launch flag (Firefox sets the UA via a pref, not argv), so
+  // the observability is gated to the useragent-flag capability. The arg
+  // forwarding itself is engine-neutral and covered by the Go launcher tests.
+  test.requires('useragent-flag')('start({ args }) passes flags to the browser', async () => {
     const bro2 = await browser.start({
       headless: true,
       args: ['--user-agent=VibiumArgsTest/9.9'],
