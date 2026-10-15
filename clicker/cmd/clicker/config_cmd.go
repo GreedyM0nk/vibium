@@ -150,8 +150,10 @@ func writeConfigTemplate(cmd *cobra.Command, t configTemplate, force bool) (stri
 	if err := os.WriteFile(path, []byte(*t.content), 0600); err != nil {
 		return "", fmt.Errorf("could not write %s: %w", path, err)
 	}
-	// WriteFile respects umask, so an inherited one can widen the mode.
-	if err := os.Chmod(path, 0600); err != nil {
+	// WriteFile's mode respects umask and means nothing on Windows, where it
+	// only maps to the read-only attribute (#655). Restrict explicitly:
+	// chmod 0600 on Unix, an owner-only ACL on Windows.
+	if err := restrictToOwner(path); err != nil {
 		return "", fmt.Errorf("could not set permissions on %s: %w", path, err)
 	}
 
