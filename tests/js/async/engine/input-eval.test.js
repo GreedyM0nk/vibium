@@ -127,11 +127,15 @@ describe('Mouse: page-level input', () => {
     const vibe = await bro.page();
     await vibe.go('data:text/html,<body style="margin:0"><div style="height:5000px;background:linear-gradient(red,blue)">Tall</div></body>');
 
-    // Scroll down
+    // Scroll down. The wheel event scrolls asynchronously and a loaded CI
+    // runner can take over 300ms to composite, so poll instead of sampling
+    // once.
     await vibe.mouse.wheel(0, 500);
-    await vibe.wait(300);
-
-    const scrollY = await vibe.evaluate('window.scrollY;');
+    let scrollY = 0;
+    for (let i = 0; i < 20 && !(scrollY > 0); i++) {
+      await vibe.wait(250);
+      scrollY = await vibe.evaluate('window.scrollY;');
+    }
     assert.ok(scrollY > 0, `Page should have scrolled down, scrollY: ${scrollY}`);
   });
 });
