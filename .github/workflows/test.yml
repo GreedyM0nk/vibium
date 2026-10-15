@@ -112,6 +112,10 @@ jobs:
   #                     the macOS 26 runner's dyld aborts binaries without it,
   #                     so macOS builds with current Go while Linux holds the
   #                     go.mod floor
+  #   suite_parallel  — the macOS runner has 3 cores and 7 GB against Linux's
+  #                     4 and 16, and renders Chrome in software; 4-way suite
+  #                     parallelism intermittently starved it into scattered
+  #                     30s test timeouts (run 38786751399)
   # Windows is not in the matrix yet: its legs need Go test fixes (Unix file
   # modes, XDG, path separators), Python client binary discovery for
   # vibium.exe, and a story for Firefox auto-install, which the binary
@@ -130,11 +134,13 @@ jobs:
             rollup_native: '@rollup/rollup-linux-x64-gnu'
             display_wrap: xvfb-run --auto-servernum
             python_version: '3.9'
+            suite_parallel: 4
           - os: macos-latest
             cache_root: ~/Library/Caches/vibium
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
             go_version: stable
+            suite_parallel: 2
     runs-on: ${{ matrix.os }}
     # Backstop only — scripts/timeout.mjs fails a hung suite after 10 min.
     timeout-minutes: 30
@@ -222,7 +228,7 @@ jobs:
       # their own runner in chrome-checks (#513). Locally `make test` is
       # still the whole suite.
       - name: Test
-        run: ${{ matrix.display_wrap }} make test-core SUITE_PARALLEL=4
+        run: ${{ matrix.display_wrap }} make test-core SUITE_PARALLEL=${{ matrix.suite_parallel }}
 
       - name: Audit capability selection
         run: make test-capability-audit
