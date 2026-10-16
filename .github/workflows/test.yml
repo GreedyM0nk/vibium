@@ -97,10 +97,51 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # Each suite job runs on Linux and macOS via the matrix below. The include
+  # entries carry what differs per OS:
+  #   cache_root      — where paths.go puts browser downloads on that OS
+  #   rollup_native   — npm drops optional native modules for platforms other
+  #                     than the one that generated the lockfile (npm/cli#4828),
+  #                     so each leg installs its own rollup module explicitly
+  #   display_wrap    — the Python suite's headed tests need a display; only
+  #                     Linux runners lack one, so only Linux wraps in xvfb
+  #   python_version  — setup-python has no 3.9 build for Apple Silicon, so
+  #                     macOS tests a current Python while Linux holds the
+  #                     3.9 floor
+  #   go_version      — Go emits the LC_UUID load command only from 1.23, and
+  #                     the macOS 26 runner's dyld aborts binaries without it,
+  #                     so macOS builds with current Go while Linux holds the
+  #                     go.mod floor
+  #   suite_parallel  — the macOS runner has 3 cores and 7 GB against Linux's
+  #                     4 and 16, and renders Chrome in software; 4-way suite
+  #                     parallelism intermittently starved it into scattered
+  #                     30s test timeouts (run 38786751399)
+  # Windows is not in the matrix yet: its legs need Go test fixes (Unix file
+  # modes, XDG, path separators), Python client binary discovery for
+  # vibium.exe, and a story for Firefox auto-install, which the binary
+  # refuses on Windows.
   chrome:
-    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      # A failing OS is signal about that OS; let the other legs finish.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cache_root: ~/.cache/vibium
+            rollup_native: '@rollup/rollup-linux-x64-gnu'
+            display_wrap: xvfb-run --auto-servernum
+            python_version: '3.9'
+            suite_parallel: 4
+          - os: macos-latest
+            cache_root: ~/Library/Caches/vibium
+            rollup_native: '@rollup/rollup-darwin-arm64'
+            python_version: '3.13'
+            go_version: stable
+            suite_parallel: 2
+    runs-on: ${{ matrix.os }}
     # Backstop only — scripts/timeout.mjs fails a hung suite after 10 min.
     timeout-minutes: 30
 
@@ -114,6 +155,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -127,7 +172,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: ${{ matrix.python_version }}
           cache: pip
           cache-dependency-path: |
             clients/python/pyproject.toml
@@ -143,6 +188,7 @@ jobs:
       # Ubuntu 24.04 restricts unprivileged user namespaces, which breaks
       # Chrome's sandbox (HTTP 500 on session creation).
       - name: Configure kernel for Chrome sandbox
+        if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       # Keyed on browsers.json so pin bumps fetch a fresh browser and
@@ -150,29 +196,30 @@ jobs:
       - name: Cache Chrome for Testing
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/chrome-for-testing
+          path: ${{ matrix.cache_root }}/chrome-for-testing
           key: ${{ runner.os }}-chrome-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-chrome-
 
-      # npm ci installs exactly what the lockfile pins. The lockfile is
-      # generated on macOS, so rollup's Linux native module is missing from
-      # it and has to be added separately, locked to the rollup version the
-      # lockfile installed so it cannot float to a newer release.
+      # npm ci installs exactly what the lockfile pins, minus this runner's
+      # rollup native module (npm/cli#4828, see the matrix comment above),
+      # which is added separately — locked to the rollup version the lockfile
+      # installed so it cannot float to a newer release.
       - name: Install npm dependencies
         run: |
           npm ci
-          npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('rollup/package.json').version")
+          npm install --no-save ${{ matrix.rollup_native }}@$(node -p "require('rollup/package.json').version")
 
       - name: Build
         run: make
 
       # Browser-free: fails when api.md is malformed or a client column
-      # claims a symbol the client does not export.
+      # claims a symbol the client does not export. OS-independent, so one
+      # leg is enough.
       - name: API drift check
+        if: runner.os == 'Linux'
         run: make check-api-drift
 
-      # xvfb: the Python suite's headed tests need a display.
       # The NODE_TEST_TIMEOUT override is gone with Node 20: --test-timeout is
       # per test now, not per file, so the Makefile's 30s default applies and a
       # hung ordinary test surfaces in 30s.
@@ -181,7 +228,7 @@ jobs:
       # their own runner in chrome-checks (#513). Locally `make test` is
       # still the whole suite.
       - name: Test
-        run: xvfb-run --auto-servernum make test-core SUITE_PARALLEL=4
+        run: ${{ matrix.display_wrap }} make test-core SUITE_PARALLEL=${{ matrix.suite_parallel }}
 
       - name: Audit capability selection
         run: make test-capability-audit
@@ -195,9 +242,24 @@ jobs:
   # job so its wall time stays near the pre-#484 suite's (#513). Not a
   # required check by name: the test gate below fails unless this passes.
   chrome-checks:
-    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cache_root: ~/.cache/vibium
+            rollup_native: '@rollup/rollup-linux-x64-gnu'
+            display_wrap: xvfb-run --auto-servernum
+            python_version: '3.9'
+          - os: macos-latest
+            cache_root: ~/Library/Caches/vibium
+            rollup_native: '@rollup/rollup-darwin-arm64'
+            python_version: '3.13'
+            go_version: stable
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
 
     steps:
@@ -208,6 +270,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -220,7 +286,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: ${{ matrix.python_version }}
           cache: pip
           cache-dependency-path: |
             clients/python/pyproject.toml
@@ -235,6 +301,7 @@ jobs:
 
       # Chrome's sandbox needs this on Ubuntu 24.04, same as the chrome job.
       - name: Configure kernel for Chrome sandbox
+        if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       # Same key as the chrome job, so this restores what that job saved
@@ -242,7 +309,7 @@ jobs:
       - name: Cache Chrome for Testing
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/chrome-for-testing
+          path: ${{ matrix.cache_root }}/chrome-for-testing
           key: ${{ runner.os }}-chrome-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-chrome-
@@ -250,22 +317,37 @@ jobs:
       - name: Install npm dependencies
         run: |
           npm ci
-          npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('rollup/package.json').version")
+          npm install --no-save ${{ matrix.rollup_native }}@$(node -p "require('rollup/package.json').version")
 
       - name: Build
         run: make
 
       - name: Test Check and Run
-        run: xvfb-run --auto-servernum make test-checkrun
+        run: ${{ matrix.display_wrap }} make test-checkrun
 
       - name: Clean up zombie processes
         if: always()
         run: make double-tap
 
   firefox:
-    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cache_root: ~/.cache/vibium
+            rollup_native: '@rollup/rollup-linux-x64-gnu'
+            display_wrap: xvfb-run --auto-servernum
+            python_version: '3.9'
+          - os: macos-latest
+            cache_root: ~/Library/Caches/vibium
+            rollup_native: '@rollup/rollup-darwin-arm64'
+            python_version: '3.13'
+            go_version: stable
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       VIBIUM_REQUIRE_FIREFOX: 1
@@ -278,6 +360,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -290,7 +376,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: ${{ matrix.python_version }}
           cache: pip
           cache-dependency-path: |
             clients/python/pyproject.toml
@@ -306,7 +392,7 @@ jobs:
       - name: Cache Firefox
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/firefox
+          path: ${{ matrix.cache_root }}/firefox
           key: ${{ runner.os }}-firefox-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-firefox-
@@ -317,19 +403,20 @@ jobs:
       - name: Cache Chrome for Testing
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/chrome-for-testing
+          path: ${{ matrix.cache_root }}/chrome-for-testing
           key: ${{ runner.os }}-chrome-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-chrome-
 
       # Chrome's sandbox needs this on Ubuntu 24.04, same as the chrome job.
       - name: Configure kernel for Chrome sandbox
+        if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: Install dependencies
         run: |
           npm ci
-          npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('rollup/package.json').version")
+          npm install --no-save ${{ matrix.rollup_native }}@$(node -p "require('rollup/package.json').version")
 
       - name: Build and install browsers
         run: |
@@ -338,10 +425,10 @@ jobs:
           make install-browser
 
       - name: Test Firefox capabilities
-        run: xvfb-run --auto-servernum make test-firefox-capabilities
+        run: ${{ matrix.display_wrap }} make test-firefox-capabilities
 
       - name: Test focused Firefox behavior
-        run: xvfb-run --auto-servernum make test-firefox
+        run: ${{ matrix.display_wrap }} make test-firefox
 
       - name: Clean up zombie processes
         if: always()
@@ -352,9 +439,24 @@ jobs:
   # Split from the firefox job for the same reason chrome-checks exists:
   # these suites stand alone and were the firefox job's longest step (#513).
   firefox-checks:
-    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cache_root: ~/.cache/vibium
+            rollup_native: '@rollup/rollup-linux-x64-gnu'
+            display_wrap: xvfb-run --auto-servernum
+            python_version: '3.9'
+          - os: macos-latest
+            cache_root: ~/Library/Caches/vibium
+            rollup_native: '@rollup/rollup-darwin-arm64'
+            python_version: '3.13'
+            go_version: stable
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       VIBIUM_REQUIRE_FIREFOX: 1
@@ -367,6 +469,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # go-version is only set on macOS (see the matrix comment) and wins
+          # over go-version-file there; everywhere else it is empty and the
+          # go.mod version applies.
+          go-version: ${{ matrix.go_version }}
           go-version-file: clicker/go.mod
           cache-dependency-path: clicker/go.sum
 
@@ -379,7 +485,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: ${{ matrix.python_version }}
           cache: pip
           cache-dependency-path: |
             clients/python/pyproject.toml
@@ -395,7 +501,7 @@ jobs:
       - name: Cache Firefox
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/firefox
+          path: ${{ matrix.cache_root }}/firefox
           key: ${{ runner.os }}-firefox-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-firefox-
@@ -406,19 +512,20 @@ jobs:
       - name: Cache Chrome for Testing
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/vibium/chrome-for-testing
+          path: ${{ matrix.cache_root }}/chrome-for-testing
           key: ${{ runner.os }}-chrome-${{ hashFiles('clicker/internal/paths/browsers.json') }}
           restore-keys: |
             ${{ runner.os }}-chrome-
 
       # Chrome's sandbox needs this on Ubuntu 24.04, same as the chrome job.
       - name: Configure kernel for Chrome sandbox
+        if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: Install dependencies
         run: |
           npm ci
-          npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('rollup/package.json').version")
+          npm install --no-save ${{ matrix.rollup_native }}@$(node -p "require('rollup/package.json').version")
 
       - name: Build and install browsers
         run: |
@@ -427,7 +534,7 @@ jobs:
           make install-browser
 
       - name: Test Check and Run on Firefox
-        run: xvfb-run --auto-servernum make test-check test-run ENGINE=firefox
+        run: ${{ matrix.display_wrap }} make test-check test-run ENGINE=firefox
 
       - name: Clean up zombie processes
         if: always()
@@ -437,6 +544,8 @@ jobs:
   # This gate reports it, green only when every suite job passes. The check
   # and run shards are not required by name, so this is the only thing that
   # enforces them — a new suite job must be added here or it is decorative.
+  # Each needs result below aggregates every OS leg of that job's matrix, so
+  # a failure on any OS fails the gate.
   # if: always() keeps the gate from being skipped on failure, which
   # protection would treat as satisfied.
   test:

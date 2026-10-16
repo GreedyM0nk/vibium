@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/vibium/clicker/internal/ai"
 	"github.com/vibium/clicker/internal/api"
-	"github.com/vibium/clicker/internal/verifier"
+	"github.com/vibium/clicker/internal/check"
 )
 
 // OperationCLIOptions controls browser ownership for the CLI only. These options
@@ -25,14 +24,14 @@ type OperationCLIOptions struct {
 // CheckCLI runs under the daemon command mutex. Checking ownership, launching,
 // checking the claim, finalizing the recording, and closing form one serialized action:
 // another command cannot start or borrow a browser between these steps.
-func (h *Handlers) CheckCLI(req verifier.Request, options OperationCLIOptions) (verifier.Result, error) {
+func (h *Handlers) CheckCLI(req check.Request, options OperationCLIOptions) (ai.Result, error) {
 	if err := req.Validate(); err != nil {
-		return verifier.Result{}, err
+		return ai.Result{}, err
 	}
 	if req.Record != "" {
-		return verifier.Result{}, fmt.Errorf("browser lifecycle options require live verification")
+		return ai.Result{}, fmt.Errorf("browser lifecycle options require live verification")
 	}
-	return withOperationBrowser(h, options, func() (verifier.Result, error) { return h.Check(req) })
+	return withOperationBrowser(h, options, func() (ai.Result, error) { return h.Check(req) })
 }
 
 // One serialized ownership policy for standalone CLI model operations.
@@ -53,23 +52,23 @@ func withOperationBrowser[T any](h *Handlers, options OperationCLIOptions, run f
 }
 
 // Check runs under the daemon mutex or the MCP server's serialized handler.
-func (h *Handlers) Check(req verifier.Request) (verifier.Result, error) {
+func (h *Handlers) Check(req check.Request) (ai.Result, error) {
 	if err := req.Validate(); err != nil {
-		return verifier.Result{}, err
+		return ai.Result{}, err
 	}
 	if req.Record != "" {
-		return verifier.CheckRecord(context.Background(), req)
+		return check.CheckRecord(context.Background(), req)
 	}
-	result, err := h.runLiveOperation("Check", verifier.Method, "claim", req.Claim, req.Output, req.Config, verifier.ToolPolicy{}, func(ctx context.Context, tools verifier.ToolExecutor) (verifier.RecordedResult, error) {
-		return (&verifier.Model{}).Check(ctx, req, tools)
+	result, err := h.runLiveOperation("Check", check.Method, "claim", req.Claim, req.Output, req.Config, ai.ToolPolicy{}, func(ctx context.Context, tools ai.ToolExecutor) (ai.RecordedResult, error) {
+		return check.Check(ctx, req, tools)
 	})
 	if err != nil {
-		return verifier.Result{}, err
+		return ai.Result{}, err
 	}
-	return result.(verifier.Result), nil
+	return result.(ai.Result), nil
 }
 
-func (h *Handlers) runLiveOperation(label, method, inputKey, input, output string, config verifier.Config, policy verifier.ToolPolicy, run func(context.Context, verifier.ToolExecutor) (verifier.RecordedResult, error)) (result verifier.RecordedResult, err error) {
+func (h *Handlers) runLiveOperation(label, method, inputKey, input, output string, config ai.Config, policy ai.ToolPolicy, run func(context.Context, ai.ToolExecutor) (ai.RecordedResult, error)) (result ai.RecordedResult, err error) {
 	if h.connectURL != "" || (h.launchedEngine != "chrome" && h.launchedEngine != "firefox") || h.client == nil {
 		return result, fmt.Errorf("operation requires an existing local Chrome or Firefox session; run vibium go first")
 	}
@@ -85,7 +84,7 @@ func (h *Handlers) runLiveOperation(label, method, inputKey, input, output strin
 		}
 		defer func() { err = errors.Join(err, finish()) }()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), verifier.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), ai.Timeout)
 	defer cancel()
 	restore := h.client.SetCommandContext(ctx)
 	defer restore()
@@ -93,7 +92,7 @@ func (h *Handlers) runLiveOperation(label, method, inputKey, input, output strin
 	if err != nil {
 		return result, err
 	}
-	executor := &modelTools{h: h, page: page, policy: policy}
+	executor := ai.NewModelToolExecutor(&modelTools{h: h, page: page}, policy, true)
 	h.modelRunning = true
 	defer func() { h.modelRunning = false }()
 	var group string
@@ -124,7 +123,7 @@ func (h *Handlers) runLiveOperation(label, method, inputKey, input, output strin
 
 func (h *Handlers) checkMCP(args map[string]interface{}) (*ToolsCallResult, error) {
 	for key := range args {
-		if key != "claim" && key != "record" && key != "page" && key != "baseURL" && !verifier.IsOverride(key) {
+		if key != "claim" && key != "record" && key != "page" && key != "baseURL" && !ai.IsOverride(key) {
 			return nil, fmt.Errorf("unsupported verification argument %s", key)
 		}
 	}
@@ -156,11 +155,11 @@ func (h *Handlers) checkMCP(args map[string]interface{}) (*ToolsCallResult, erro
 			return nil, fmt.Errorf("baseURL must be a nonempty site URL")
 		}
 	}
-	config, err := verifier.ConfigFromParams("check", args)
+	config, err := ai.ConfigFromParams("check", args)
 	if err != nil {
 		return nil, err
 	}
-	req := verifier.Request{Claim: claim, Record: record, BaseSite: baseSite, Config: config}
+	req := check.Request{Claim: claim, Record: record, BaseSite: baseSite, Config: config}
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -184,151 +183,32 @@ func (h *Handlers) checkMCP(args map[string]interface{}) (*ToolsCallResult, erro
 	return &ToolsCallResult{Content: []Content{{Type: "text", Text: string(data)}}}, nil
 }
 
+// modelTools is the agent-side ModelDispatcher: the shared policy in
+// verifier has already validated the call and applied the navigation,
+// scroll, timeout, and password guards; only the dispatch into the MCP
+// handlers and the script probe live here (#571). @e refs resolve through
+// resolveSelector, so this surface passes refs=true.
 type modelTools struct {
-	h      *Handlers
-	page   string
-	policy verifier.ToolPolicy
+	h    *Handlers
+	page string
 }
 
-var modelToolAllowlist = map[string]bool{
-	"browser_get_url": true, "browser_map": true, "browser_a11y_tree": true,
-	"browser_navigate": true, "browser_reload": true, "browser_click": true,
-	"browser_fill": true, "browser_type": true, "browser_press": true,
-	"browser_scroll": true, "browser_find": true, "browser_get_text": true,
-	"browser_get_value": true, "browser_screenshot": true,
-}
-
-func (v *modelTools) Tools() []verifier.Tool {
-	var result []verifier.Tool
-	for _, t := range GetToolSchemas() {
-		if !modelToolAllowlist[t.Name] {
-			continue
-		}
-		props := t.InputSchema["properties"].(map[string]interface{})
-		// Pin all tools to the existing page; no arbitrary file output or hidden
-		// handler parameters may cross this boundary.
-		delete(props, "page")
-		if t.Name == "browser_screenshot" {
-			delete(props, "filename")
-			delete(props, "annotate")
-			delete(props, "fullPage")
-		}
-		// The verifier caps scroll increments at 10 per call. Say so in the
-		// schema the model gets, instead of letting it find out from the
-		// error (#619).
-		if t.Name == "browser_scroll" {
-			amount := props["amount"].(map[string]interface{})
-			amount["description"] = ScrollAmountDesc + " (default: 3, maximum: 10 per call; repeat the call to scroll further)"
-			amount["maximum"] = 10
-		}
-		result = append(result, verifier.Tool{Name: t.Name, Description: t.Description, Parameters: t.InputSchema})
-	}
-	for _, kind := range []string{"console", "network"} {
-		result = append(result, verifier.Tool{Name: "browser_" + kind, Description: "Inspect up to 50 recent " + kind + " observations (newest first) from this page's active live recording. Unavailable if recording is off; absence is not proof of no errors. Headers, cookies and bodies are excluded.", Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}})
-	}
-	return result
-}
-
-func (v *modelTools) Execute(ctx context.Context, name string, args map[string]interface{}) (verifier.Observation, error) {
-	if err := ctx.Err(); err != nil {
-		return verifier.Observation{}, err
-	}
-	var schema map[string]interface{}
-	for _, t := range v.Tools() {
-		if t.Name == name {
-			schema = t.Parameters
-			break
-		}
-	}
-	if schema == nil {
-		return verifier.Observation{}, fmt.Errorf("disallowed verifier tool")
-	}
-	props := schema["properties"].(map[string]interface{})
-	clean := map[string]interface{}{}
-	for key, val := range args {
-		prop, ok := props[key].(map[string]interface{})
-		if !ok {
-			return verifier.Observation{}, fmt.Errorf("disallowed verifier argument %q", key)
-		}
-		valid := false
-		switch prop["type"] {
-		case "string":
-			_, valid = val.(string)
-		case "number", "integer":
-			n, ok := val.(float64)
-			valid = ok && n >= 0 && n <= 30000
-		case "boolean":
-			_, valid = val.(bool)
-		}
-		if !valid {
-			return verifier.Observation{}, fmt.Errorf("invalid verifier argument %q", key)
-		}
-		if enum, ok := prop["enum"].([]string); ok {
-			found := false
-			for _, e := range enum {
-				if e == val {
-					found = true
-				}
-			}
-			if !found {
-				return verifier.Observation{}, fmt.Errorf("invalid verifier argument %q", key)
-			}
-		}
-		clean[key] = val
-	}
-	if required, ok := schema["required"].([]string); ok {
-		for _, key := range required {
-			if val, ok := clean[key]; !ok || val == "" {
-				return verifier.Observation{}, fmt.Errorf("missing verifier argument %q", key)
-			}
-		}
-	}
-	if name == "browser_navigate" {
-		u, err := url.Parse(clean["url"].(string))
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-			return verifier.Observation{}, fmt.Errorf("verifier navigation requires an HTTP(S) URL without credentials")
-		}
-	}
-	if name == "browser_scroll" {
-		if n, ok := clean["amount"].(float64); ok && n > 10 {
-			// Model-correctable, so a tool result rather than a fatal error:
-			// the model retries with a smaller amount instead of the whole
-			// check aborting (#619).
-			return verifier.Observation{}, &verifier.ActionError{Err: fmt.Errorf("scroll amount %v exceeds the maximum of 10; scroll again with a smaller amount, repeating the call if needed", n)}
-		}
-	}
-	if _, ok := props["timeout"]; ok {
-		remaining := 5 * time.Second
-		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < remaining {
-			remaining = time.Until(deadline)
-		}
-		if supplied, ok := clean["timeout"].(float64); !ok || supplied > float64(remaining.Milliseconds()) || supplied == 0 {
-			clean["timeout"] = float64(remaining.Milliseconds())
-		}
-	}
-	// Never read or type into a password field. This fixed inspection uses the
-	// existing BiDi client; it does not expose eval to the model.
-	selector, _ := clean["selector"].(string)
-	if selector != "" || name == "browser_press" {
-		script := `(selector) => { ` + api.PierceQueryJS() + `; let el = selector ? pierceQuery(document, selector) : document.activeElement; while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement; return !!el && (el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password'); }`
-		secret, err := v.h.client.CallFunction(v.page, script, []interface{}{v.h.resolveSelector(selector)})
-		if err != nil {
-			// Usually a model-supplied selector the engine rejects; recoverable.
-			return verifier.Observation{}, &verifier.ActionError{Err: fmt.Errorf("cannot inspect verifier target")}
-		}
-		if secret == true && !v.policy.AllowsCredentialInput(name) {
-			if v.policy.CredentialInput {
-				return verifier.Observation{Text: "Password fields are unavailable for reading. Return not_completed if completion cannot be established without reading them."}, nil
-			}
-			return verifier.Observation{Text: "Password fields are unavailable to the verifier. Return inconclusive if required."}, nil
-		}
-	}
-	clean["page"] = v.page
-	result, err := v.h.Call(name, clean)
+func (v *modelTools) ProbeSecret(ctx context.Context, selector, name string) (bool, error) {
+	script := ai.SecretProbeJS(api.PierceQueryJS())
+	secret, err := v.h.client.CallFunction(v.page, script, []interface{}{v.h.resolveSelector(selector)})
 	if err != nil {
-		return verifier.Observation{}, &verifier.ActionError{Err: err}
+		return false, err
 	}
-	var obs verifier.Observation
+	return secret == true, nil
+}
+
+func (v *modelTools) Dispatch(ctx context.Context, name string, args map[string]interface{}) (ai.Observation, error) {
+	args["page"] = v.page
+	result, err := v.h.Call(name, args)
+	if err != nil {
+		return ai.Observation{}, &ai.ActionError{Err: err}
+	}
+	var obs ai.Observation
 	for _, c := range result.Content {
 		if c.Type == "text" {
 			obs.Text += c.Text + "\n"
@@ -338,8 +218,8 @@ func (v *modelTools) Execute(ctx context.Context, name string, args map[string]i
 			obs.Text += "Screenshot captured."
 		}
 	}
-	obs.Text = verifier.Clip(strings.TrimSpace(obs.Text))
-	if len(obs.Image) > verifier.MaxImage {
+	obs.Text = ai.Clip(strings.TrimSpace(obs.Text))
+	if len(obs.Image) > ai.MaxImage {
 		obs.Image = ""
 		obs.Text = "Screenshot exceeds payload limit; use structured inspection."
 	}
@@ -353,7 +233,7 @@ func recordedToolResult(result *ToolsCallResult) interface{} {
 	if result != nil {
 		for _, c := range result.Content {
 			if c.Type == "text" {
-				text = append(text, verifier.Clip(c.Text))
+				text = append(text, ai.Clip(c.Text))
 			}
 		}
 	}
