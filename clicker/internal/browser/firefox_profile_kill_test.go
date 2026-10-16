@@ -21,6 +21,7 @@ func TestFirefoxProfileKillScript(t *testing.T) {
 		"-like",                             // substring match on the command line
 		"Stop-Process",                      // the actual termination
 		"-Force",                            // kill, do not ask
+		"Wait-Process",                      // block until dead so Close can remove the profile dir
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q\ngot: %s", want, script)

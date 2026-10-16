@@ -503,13 +503,17 @@ func (r *LaunchResult) Close() error {
 // parentage, which the Windows launcher process breaks (#622). The basename
 // (vibium-firefox-profile-NNNN) is used rather than the full path: it is
 // unique per session and contains only characters safe to embed in the
-// -like pattern, so there is nothing to escape.
+// -like pattern, so there is nothing to escape. Stop-Process only initiates
+// termination, so the script waits for the processes to exit: Close removes
+// the profile dir right after the sweep, and a still-dying firefox.exe
+// holding a handle would make that removal fail.
 func firefoxProfileKillScript(profileDir string) string {
 	base := filepath.Base(profileDir)
 	return fmt.Sprintf(
-		`Get-CimInstance Win32_Process -Filter "Name='firefox.exe'" | `+
-			`Where-Object { $_.CommandLine -like '*%s*' } | `+
-			`ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+		`$procs = @(Get-CimInstance Win32_Process -Filter "Name='firefox.exe'" | `+
+			`Where-Object { $_.CommandLine -like '*%s*' }); `+
+			`$procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; `+
+			`$procs | ForEach-Object { Wait-Process -Id $_.ProcessId -Timeout 5 -ErrorAction SilentlyContinue }`,
 		base,
 	)
 }

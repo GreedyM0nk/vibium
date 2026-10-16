@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/vibium/clicker/internal/log"
 )
 
 // platformChromeArgs returns Windows-specific Chrome launch arguments.
@@ -43,7 +45,9 @@ func killByPid(pid int) {
 // and leaves the user's own Firefox untouched.
 func killBrowserProfileProcesses(profileDir string) {
 	script := firefoxProfileKillScript(profileDir)
-	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Run()
+	if err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Run(); err != nil {
+		log.Debug("firefox profile sweep failed", "profile", profileDir, "error", err)
+	}
 }
 
 // waitForProcessDead polls until the given PID has exited or timeout is reached.
