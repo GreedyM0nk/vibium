@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -81,7 +82,10 @@ func TestChromeArgsCustomEnvUnset(t *testing.T) {
 	if slices.Contains(args, "") {
 		t.Errorf("expected no empty-string args, got %v", args)
 	}
-	if slices.Contains(args, "--no-sandbox") {
+	// Windows always gets --no-sandbox from platformChromeArgs (the Chrome
+	// for Testing sandbox cannot access its own executable under AppData),
+	// so absence is only the expectation elsewhere (#660).
+	if runtime.GOOS != "windows" && slices.Contains(args, "--no-sandbox") {
 		t.Errorf("did not expect --no-sandbox when env unset, got %v", args)
 	}
 }

@@ -156,6 +156,7 @@ func launchFirefox(opts LaunchOptions) (*LaunchResult, error) {
 		BrowserCmd:  cmd,
 		Port:        port,
 		UserDataDir: profileDir,
+		Engine:      "firefox",
 	}, nil
 }
 
