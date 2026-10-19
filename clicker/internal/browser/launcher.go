@@ -70,8 +70,9 @@ type LaunchOptions struct {
 	Engine   string // "chrome" (default) or "firefox"
 	Channel  string // engine release channel; "" means the VIBIUM_ENGINE_CHANNEL default
 	Headless bool
-	Port     int  // Chromedriver port, 0 = auto-select
-	Verbose  bool // Show browser/driver output
+	Port     int      // Chromedriver port, 0 = auto-select
+	Verbose  bool     // Show browser/driver output
+	Args     []string // extra engine command-line flags, appended last (#640)
 }
 
 // LaunchResult contains the result of launching the browser via chromedriver.
@@ -82,6 +83,9 @@ type LaunchResult struct {
 	BrowserCmd   *exec.Cmd
 	Port         int
 	UserDataDir  string // Chrome temp profile dir — cleaned up on Close()
+	// Engine is "firefox" or "chrome"/"" so Close can apply the Firefox-only
+	// Windows profile sweep (#622) without reaching for the global engine flag.
+	Engine string
 }
 
 // sessionRequest is the payload for creating a new session.
@@ -201,7 +205,7 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 	wsURL := fmt.Sprintf("ws://localhost:%d/session", port)
 	conn, connErr := bidi.Connect(wsURL)
 	if connErr == nil {
-		caps := buildCapabilities(chromePath, opts.Headless)
+		caps := buildCapabilities(chromePath, opts.Headless, opts.Args)
 		// Handshake without NewClient: a Client's reader would own this
 		// connection forever, and the consumer of LaunchResult.BidiConn
 		// (agent or api router) must be able to take over reads itself.
@@ -224,7 +228,7 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 	}
 
 	// Fallback: HTTP POST /session (original path)
-	sessionID, httpWsURL, userDataDir, err := createSession(baseURL, chromePath, opts.Headless, opts.Verbose)
+	sessionID, httpWsURL, userDataDir, err := createSession(baseURL, chromePath, opts.Headless, opts.Verbose, opts.Args)
 	if err != nil {
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("failed to create session: %w", err)
@@ -266,8 +270,10 @@ func waitForChromedriver(baseURL string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for chromedriver")
 }
 
-// chromeArgs returns the standard Chrome launch arguments.
-func chromeArgs(headless bool) []string {
+// chromeArgs returns the standard Chrome launch arguments, with any
+// caller-supplied extras (StartOptions.args / --browser-arg, #640) appended
+// last so they win over the defaults.
+func chromeArgs(headless bool, extra []string) []string {
 	args := []string{
 		"--no-first-run",
 		"--no-default-browser-check",
@@ -306,6 +312,8 @@ func chromeArgs(headless bool) []string {
 	// etc. in root/CI/container environments where Chrome refuses to start
 	// otherwise. Empty tokens (from extra whitespace) are skipped.
 	args = append(args, customChromeArgs()...)
+	// Caller-supplied flags last, so an explicit arg overrides a default.
+	args = append(args, extra...)
 	return args
 }
 
@@ -366,7 +374,7 @@ func splitFlagString(s string) []string {
 }
 
 // buildCapabilities returns the capabilities map for BiDi session.new.
-func buildCapabilities(chromePath string, headless bool) map[string]interface{} {
+func buildCapabilities(chromePath string, headless bool, extraArgs []string) map[string]interface{} {
 	return map[string]interface{}{
 		"alwaysMatch": map[string]interface{}{
 			"browserName":  "chrome",
@@ -376,7 +384,7 @@ func buildCapabilities(chromePath string, headless bool) map[string]interface{} 
 			},
 			"goog:chromeOptions": map[string]interface{}{
 				"binary":          chromePath,
-				"args":            chromeArgs(headless),
+				"args":            chromeArgs(headless, extraArgs),
 				"excludeSwitches": []string{"enable-automation", "enable-logging"},
 				"prefs": map[string]interface{}{
 					"credentials_enable_service":                           false,
@@ -390,9 +398,9 @@ func buildCapabilities(chromePath string, headless bool) map[string]interface{} 
 }
 
 // createSession creates a new WebDriver session with BiDi enabled via HTTP.
-func createSession(baseURL, chromePath string, headless, verbose bool) (string, string, string, error) {
+func createSession(baseURL, chromePath string, headless, verbose bool, extraArgs []string) (string, string, string, error) {
 	reqBody := map[string]interface{}{
-		"capabilities": buildCapabilities(chromePath, headless),
+		"capabilities": buildCapabilities(chromePath, headless, extraArgs),
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -466,6 +474,18 @@ func (r *LaunchResult) Close() error {
 		process.Untrack(r.BrowserCmd)
 	}
 
+	// Firefox on Windows is not reached by the kill above: the firefox.exe we
+	// launch is a launcher-process stub that starts the real browser as a
+	// separate, re-parented process and exits, so taskkill /T on our PID finds
+	// an empty tree and the browser (plus its ~10 content/GPU processes)
+	// survives, piling up across runs (#622). The Unix orphan sweep uses
+	// pgrep/ps and never runs on Windows. Kill by the unique per-session
+	// profile dir instead, which does not depend on process parentage and
+	// cannot touch the user's own Firefox windows (a different profile).
+	if r.Engine == "firefox" && r.UserDataDir != "" {
+		killBrowserProfileProcesses(r.UserDataDir)
+	}
+
 	// Clean up the Chrome temp profile directory for THIS session only.
 	// Do not glob-clean other Chrome temp dirs here: under parallel test runs
 	// (e.g. node --test --test-concurrency=4) every test file spawns its own
@@ -479,6 +499,28 @@ func (r *LaunchResult) Close() error {
 	}
 
 	return nil
+}
+
+// firefoxProfileKillScript returns the PowerShell that terminates every
+// firefox.exe whose command line references this session's profile directory.
+// The match is scoped to the profile so it can never kill the user's own
+// Firefox (which runs a different profile), and it does not depend on process
+// parentage, which the Windows launcher process breaks (#622). The basename
+// (vibium-firefox-profile-NNNN) is used rather than the full path: it is
+// unique per session and contains only characters safe to embed in the
+// -like pattern, so there is nothing to escape. Stop-Process only initiates
+// termination, so the script waits for the processes to exit: Close removes
+// the profile dir right after the sweep, and a still-dying firefox.exe
+// holding a handle would make that removal fail.
+func firefoxProfileKillScript(profileDir string) string {
+	base := filepath.Base(profileDir)
+	return fmt.Sprintf(
+		`$procs = @(Get-CimInstance Win32_Process -Filter "Name='firefox.exe'" | `+
+			`Where-Object { $_.CommandLine -like '*%s*' }); `+
+			`$procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; `+
+			`$procs | ForEach-Object { Wait-Process -Id $_.ProcessId -Timeout 5 -ErrorAction SilentlyContinue }`,
+		base,
+	)
 }
 
 // killProcessTree kills a process and all its descendants using process group kill.

@@ -186,7 +186,7 @@ func (d *Daemon) route(req agent.Request, notify func(method string)) (interface
 			Tools: agent.GetToolSchemas(),
 		}, nil
 	case "initialize":
-		return d.handleInitialize()
+		return d.handleInitialize(req.Params)
 	case "initialized", "notifications/initialized":
 		return nil, nil
 	default:
@@ -210,10 +210,24 @@ func (d *Daemon) handleStatus() (interface{}, *agent.Error) {
 	}, nil
 }
 
-// handleInitialize handles the MCP initialize request.
-func (d *Daemon) handleInitialize() (interface{}, *agent.Error) {
+// handleInitialize handles the MCP initialize request. It negotiates the
+// protocol version the same way the stdio server does: the daemon socket
+// speaks the same handshake, so a client that dropped 2024-11-05 would
+// otherwise hit #650's silent refusal here too.
+func (d *Daemon) handleInitialize(params json.RawMessage) (interface{}, *agent.Error) {
+	var p agent.InitializeParams
+	if params != nil {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &agent.Error{
+				Code:    agent.InvalidParams,
+				Message: "Invalid params",
+				Data:    err.Error(),
+			}
+		}
+	}
+
 	return agent.InitializeResult{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: agent.NegotiateProtocolVersion(p.ProtocolVersion),
 		Capabilities: agent.ServerCapabilities{
 			Tools: &agent.ToolsCapability{},
 		},
