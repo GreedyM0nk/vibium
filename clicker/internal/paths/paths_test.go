@@ -132,6 +132,12 @@ func withCache(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	// Windows resolves the cache from LOCALAPPDATA (USERPROFILE as the
+	// fallback) and never reads HOME or XDG_CACHE_HOME, so without these the
+	// tests seed the machine's real cache and resolve against whatever is
+	// actually installed there (#658).
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("USERPROFILE", home)
 	// These tests seed the default-channel layout, so the ambient channel
 	// must not redirect resolution to a channel subdirectory. The Beta
 	// Watch workflow exports VIBIUM_ENGINE_CHANNEL=beta job-wide, which
