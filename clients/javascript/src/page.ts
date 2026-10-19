@@ -639,8 +639,8 @@ export class Page {
 
   // --- Evaluation ---
 
-  /** Evaluate a JS expression and return the deserialized value. */
-  async evaluate<T = unknown>(expression: string | (() => unknown)): Promise<T> {
+  /** Evaluate a JS expression string or argless function and return the deserialized value. */
+  async evaluate<T = unknown>(expression: string | (() => T | Promise<T>)): Promise<T> {
     const result = await this.client.send<{ value: T }>('vibium:page.eval', {
       context: this.contextId,
       expression: toEvalExpression(expression),

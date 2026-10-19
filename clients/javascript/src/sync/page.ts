@@ -314,7 +314,7 @@ export class PageSync {
 
   // --- Evaluation ---
 
-  evaluate<T = unknown>(expression: string | (() => unknown)): T {
+  evaluate<T = unknown>(expression: string | (() => T | Promise<T>)): T {
     // Convert here, before the worker boundary: a function cannot survive the
     // structured-clone postMessage to the worker, so it must become a string
     // on this side (#639).
