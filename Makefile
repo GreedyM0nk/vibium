@@ -286,11 +286,12 @@ mtlshim:
 # and reasoning effort reach runs the fixtures configured differently.
 export VIBIUM_LOAD_AI_ENV := 0
 
-# The full suite. CI runs the two halves below on separate runners to keep
+# The full suite. CI runs the three shards below on separate runners to keep
 # wall time down (#513); locally this is still everything.
 test: build install-browser $(FAST_LAUNCH_DEP)
 	@START_TIME=$$(date +%s); \
 	"$(MAKE)" test-core-suites && \
+	"$(MAKE)" test-tail-suites && \
 	"$(MAKE)" test-checkrun-suites; \
 	EXIT=$$?; \
 	"$(MAKE)" test-cleanup; \
@@ -320,17 +321,28 @@ test-checkrun: build install-browser $(FAST_LAUNCH_DEP)
 	"$(MAKE)" test-cleanup; \
 	exit $$EXIT
 
-# The suite chains. Internal: `test`, `test-core` and `test-checkrun` wrap
-# these with build deps and cleanup; the split exists so the Check and Run
-# suites, which stand alone, can shard to their own runner.
+test-tail: build install-browser $(FAST_LAUNCH_DEP)
+	@"$(MAKE)" test-tail-suites; \
+	EXIT=$$?; \
+	"$(MAKE)" test-cleanup; \
+	exit $$EXIT
+
+# The suite chains. Internal: `test`, `test-core`, `test-tail` and
+# `test-checkrun` wrap these with build deps and cleanup; the splits exist so
+# shards can run on their own runners. The tail suites are serial by nature
+# (headed windows, the shared daemon socket), so they gain nothing from the
+# core job's parallel phase and ride on the shorter checks runner instead,
+# which balances the two legs' wall time.
 test-core-suites:
 	@"$(MAKE)" check-api-drift && \
 	"$(MAKE)" test-go && \
 	"$(MAKE)" test-cli test-cleanup && \
 	"$(MAKE)" test-js-process test-cleanup && \
 	"$(MAKE)" -j $(SUITE_PARALLEL) test-js-async test-mcp test-python test-java && \
-	"$(MAKE)" test-cleanup && \
-	"$(MAKE)" test-browser-modes test-cleanup && \
+	"$(MAKE)" test-cleanup
+
+test-tail-suites:
+	@"$(MAKE)" test-browser-modes test-cleanup && \
 	"$(MAKE)" test-firefox test-cleanup && \
 	"$(MAKE)" test-daemon test-cleanup && \
 	"$(MAKE)" test-js-sync
