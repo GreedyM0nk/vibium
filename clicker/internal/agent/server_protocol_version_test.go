@@ -19,8 +19,8 @@ func TestNegotiateProtocolVersion(t *testing.T) {
 		"garbage":    newest,
 	}
 	for requested, want := range cases {
-		if got := negotiateProtocolVersion(requested); got != want {
-			t.Errorf("negotiateProtocolVersion(%q) = %q, want %q", requested, got, want)
+		if got := NegotiateProtocolVersion(requested); got != want {
+			t.Errorf("NegotiateProtocolVersion(%q) = %q, want %q", requested, got, want)
 		}
 	}
 }

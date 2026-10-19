@@ -278,12 +278,13 @@ func (s *Server) route(req Request) (interface{}, *Error) {
 // the fallback when a client asks for a version not listed here.
 var supportedProtocolVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 
-// negotiateProtocolVersion echoes the client's requested MCP version when
+// NegotiateProtocolVersion echoes the client's requested MCP version when
 // vibium supports it, and otherwise answers with the newest version it does,
 // as the MCP initialize handshake expects. It was hard-coded to 2024-11-05, so
 // a client that has dropped that version (anubis_mcp 2.0) could not complete
-// the handshake and could not talk to vibium at all (#650).
-func negotiateProtocolVersion(requested string) string {
+// the handshake and could not talk to vibium at all (#650). Exported because
+// the daemon serves the same handshake over its socket.
+func NegotiateProtocolVersion(requested string) string {
 	for _, v := range supportedProtocolVersions {
 		if v == requested {
 			return requested
@@ -306,7 +307,7 @@ func (s *Server) handleInitialize(params json.RawMessage) (interface{}, *Error) 
 	}
 
 	return InitializeResult{
-		ProtocolVersion: negotiateProtocolVersion(p.ProtocolVersion),
+		ProtocolVersion: NegotiateProtocolVersion(p.ProtocolVersion),
 		Capabilities: ServerCapabilities{
 			Tools: &ToolsCapability{},
 		},
