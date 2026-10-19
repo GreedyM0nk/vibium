@@ -6,12 +6,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { fixture } = require('./fixture.cjs');
-const { ENGINE } = require('../helpers');
+const { VIBIUM, ENGINE } = require('../helpers');
 const exec = promisify(execFile), root = path.resolve(__dirname, '../..');
 
 test('Run surfaces share tools, recording, and shared AI configuration', { timeout: 300000 }, async t => {
   const f = await fixture(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-surfaces-'));
-  const base = { ...process.env, ...f.env, VIBIUM_BIN_PATH: path.join(root, 'clicker/bin/vibium'), VIBIUM_ENGINE: ENGINE, VIBIUM_ENGINE_CHANNEL: '', VIBIUM_ENGINE_PATH: '', VIBIUM_CONNECT_URL: '', RUN_TEST_URL: f.url };
+  const base = { ...process.env, ...f.env, VIBIUM_BIN_PATH: VIBIUM, VIBIUM_ENGINE: ENGINE, VIBIUM_ENGINE_CHANNEL: '', VIBIUM_ENGINE_PATH: '', VIBIUM_CONNECT_URL: '', RUN_TEST_URL: f.url };
   try {
     const cases = [
       ['JavaScript async', process.execPath, ['sdk-js.cjs'], '0', 'anthropic'],

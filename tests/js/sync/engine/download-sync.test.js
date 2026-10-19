@@ -38,6 +38,16 @@ after(() => {
 
 // --- Tests ---
 
+// The download event can take over a second to arrive on a loaded CI
+// runner, so positive assertions poll instead of sampling after a fixed wait.
+function waitForDownload(vibe, downloads, timeoutMs = 10000) {
+  let waited = 0;
+  while (downloads.length === 0 && waited < timeoutMs) {
+    vibe.wait(500);
+    waited += 500;
+  }
+}
+
 describe('Sync API: onDownload', () => {
   let bro;
   before(() => { bro = browser.start({ headless: true }); });
@@ -53,7 +63,7 @@ describe('Sync API: onDownload', () => {
     });
 
     vibe.find('#download-link').click();
-    vibe.wait(1000);
+    waitForDownload(vibe, downloads);
 
     assert.ok(downloads.length >= 1, `Expected at least 1 download, got ${downloads.length}`);
   });
@@ -70,7 +80,7 @@ describe('Sync API: onDownload', () => {
     });
 
     vibe.find('#download-link').click();
-    vibe.wait(1000);
+    waitForDownload(vibe, downloads);
 
     assert.ok(downloads.length >= 1);
     assert.ok(downloads[0].url.includes('/download-file'), `URL should contain /download-file, got: ${downloads[0].url}`);
@@ -104,7 +114,7 @@ describe('Sync API: onDownload', () => {
     });
 
     vibe.find('#download-link').click();
-    vibe.wait(2000);
+    waitForDownload(vibe, downloads);
 
     assert.ok(downloads.length >= 1);
     assert.ok(downloads[0].path, `path should be set, got: ${downloads[0].path}`);

@@ -174,12 +174,15 @@ async def test_response_url_status(net_browser, test_server):
 
 
 # --- Waiters ---
+# The setTimeout fuse delays the trigger until after the capture call below it
+# has subscribed. 100ms lost that race on a loaded CI runner; 1000ms keeps a
+# 5x margin under the 5s capture timeout.
 
 @pytest.mark.capability("network")
 async def test_capture_response(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server + "/fetch")
-    await vibe.evaluate("setTimeout(() => doFetch(), 100)")
+    await vibe.evaluate("setTimeout(() => doFetch(), 1000)")
     resp = await vibe.capture.response("**/api/data", timeout=5000)
     assert resp.status() == 200
     await vibe.close()
@@ -189,7 +192,7 @@ async def test_capture_response(net_browser, test_server):
 async def test_capture_request(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server + "/fetch")
-    await vibe.evaluate("setTimeout(() => doFetch(), 100)")
+    await vibe.evaluate("setTimeout(() => doFetch(), 1000)")
     req = await vibe.capture.request("**/api/data", timeout=5000)
     assert "api/data" in req.url()
     await vibe.close()
@@ -201,7 +204,7 @@ async def test_capture_request(net_browser, test_server):
 async def test_body_text(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server)
-    await vibe.evaluate("setTimeout(() => fetch('/text'), 100)")
+    await vibe.evaluate("setTimeout(() => fetch('/text'), 1000)")
     resp = await vibe.capture.response("**/text", timeout=5000)
     body = await resp.body()
     assert body is not None
@@ -213,7 +216,7 @@ async def test_body_text(net_browser, test_server):
 async def test_body_json(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server)
-    await vibe.evaluate("setTimeout(() => fetch('/json'), 100)")
+    await vibe.evaluate("setTimeout(() => fetch('/json'), 1000)")
     resp = await vibe.capture.response("**/json", timeout=5000)
     data = await resp.json()
     assert data is not None
@@ -225,7 +228,7 @@ async def test_body_json(net_browser, test_server):
 async def test_body_via_expect(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server + "/fetch")
-    await vibe.evaluate("setTimeout(() => doFetch(), 100)")
+    await vibe.evaluate("setTimeout(() => doFetch(), 1000)")
     resp = await vibe.capture.response("**/api/data", timeout=5000)
     body = await resp.body()
     assert body is not None
@@ -237,7 +240,7 @@ async def test_body_via_expect(net_browser, test_server):
 async def test_json_via_expect(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server + "/fetch")
-    await vibe.evaluate("setTimeout(() => doFetch(), 100)")
+    await vibe.evaluate("setTimeout(() => doFetch(), 1000)")
     resp = await vibe.capture.response("**/api/data", timeout=5000)
     data = await resp.json()
     assert data["count"] == 42
@@ -346,7 +349,7 @@ async def test_capture_dialog(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server)
     async with vibe.capture.dialog() as info:
-        await vibe.evaluate('setTimeout(() => alert("Hello from expect"), 50)')
+        await vibe.evaluate('setTimeout(() => alert("Hello from expect"), 1000)')
     assert info.value is not None
     assert info.value.type() == "alert"
     assert info.value.message() == "Hello from expect"
@@ -359,7 +362,7 @@ async def test_capture_dialog(net_browser, test_server):
 async def test_capture_event_response(net_browser, test_server):
     vibe = await net_browser.new_page()
     await vibe.go(test_server + "/fetch")
-    await vibe.evaluate("setTimeout(() => doFetch(), 100)")
+    await vibe.evaluate("setTimeout(() => doFetch(), 1000)")
     result = await vibe.capture.event("response", timeout=5000)
     assert result is not None
     await vibe.close()
