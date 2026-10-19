@@ -104,7 +104,7 @@ func TestChromeArgsCustomEnvWhitespace(t *testing.T) {
 // Caller-supplied flags (StartOptions.args / --browser-arg, #640) are appended
 // last, after the defaults and the env var, so an explicit flag wins.
 func TestChromeArgsExtraAppendedLast(t *testing.T) {
-	t.Setenv("VIBIUM_CHROME_ARGS", "")
+	t.Setenv("VIBIUM_CHROME_ARGS", "--disable-gpu")
 	args := chromeArgs(false, []string{"--user-agent=Bot/1", "--lang=fr"})
 
 	if !slices.Contains(args, "--user-agent=Bot/1") || !slices.Contains(args, "--lang=fr") {
@@ -112,5 +112,8 @@ func TestChromeArgsExtraAppendedLast(t *testing.T) {
 	}
 	if got := args[len(args)-1]; got != "--lang=fr" {
 		t.Errorf("extra flags should come last; last arg = %q", got)
+	}
+	if slices.Index(args, "--user-agent=Bot/1") < slices.Index(args, "--disable-gpu") {
+		t.Errorf("extra flags should come after VIBIUM_CHROME_ARGS flags; args = %v", args)
 	}
 }
