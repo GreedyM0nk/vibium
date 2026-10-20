@@ -154,11 +154,17 @@ type Router struct {
 	connectURL     string
 	connectHeaders http.Header
 	connectCaps    map[string]interface{} // extra alwaysMatch capabilities for classic endpoints
+	browserArgs    []string               // extra engine flags for a locally launched browser (#640)
 	// signer, when set, signs every outgoing request with Web Bot Auth so a
 	// site in Cloudflare's Verified Bots program can recognize the agent (#28).
 	// nil disables signing and leaves the request path untouched.
 	signer *webbotauth.Signer
 }
+
+// SetBrowserArgs sets extra engine command-line flags applied to a locally
+// launched browser. Call once before any client connects. No effect in
+// connect mode, where the browser is someone else's.
+func (r *Router) SetBrowserArgs(args []string) { r.browserArgs = args }
 
 // NewRouter creates a new router. Web Bot Auth signing turns on here, from the
 // environment, so every entry path that builds a router (pipe, daemon, serve,
@@ -242,6 +248,7 @@ func (r *Router) OnClientConnect(client ClientTransport) {
 		launchResult, err = browser.Launch(browser.LaunchOptions{
 			Engine:   r.engine,
 			Headless: r.headless,
+			Args:     r.browserArgs,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[router] Failed to launch browser for client %d: %v\n", client.ID(), err)
