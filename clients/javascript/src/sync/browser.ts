@@ -17,6 +17,13 @@ export interface StartOptions {
   /** Extra alwaysMatch capabilities for classic WebDriver endpoints
    *  (cloud grids take their config this way, via vendor-prefixed capability keys). */
   caps?: Record<string, unknown>;
+  /**
+   * Extra command-line flags for the launched browser, e.g.
+   * ['--use-fake-device-for-media-stream', '--lang=fr']. Each is passed to the
+   * engine as-is and wins over Vibium's defaults. Ignored in connect mode,
+   * where the browser is already running elsewhere.
+   */
+  args?: string[];
 }
 
 export interface BrowserSync { (goal: string, options?: RunOptions): RunResult; }

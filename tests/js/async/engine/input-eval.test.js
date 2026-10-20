@@ -125,7 +125,7 @@ describe('Mouse: page-level input', () => {
 
   test('mouse.wheel() scrolls the page', async () => {
     const vibe = await bro.page();
-    await vibe.go('data:text/html,<body style="margin:0"><div style="height:5000px;background:linear-gradient(red,blue)">Tall</div></body>');
+    await vibe.setContent('<body style="margin:0"><div style="height:5000px;background:linear-gradient(red,blue)">Tall</div></body>');
 
     // Scroll down. The wheel event scrolls asynchronously and a loaded CI
     // runner can take over 300ms to composite, so poll instead of sampling
@@ -265,6 +265,18 @@ describe('Evaluation: page-level', () => {
 
     const result = await vibe.evaluate('undefined');
     assert.strictEqual(result, null);
+  });
+
+  // The arrow-function form is what the docs and Quick Start show; it used to
+  // resolve to null silently because the function was dropped by JSON.stringify
+  // and the expression arrived empty (#639).
+  test('eval() runs a function, not just a string', async () => {
+    const vibe = await bro.page();
+    await vibe.go(`${baseURL}/example`);
+
+    assert.strictEqual(await vibe.evaluate(() => 1 + 1), 2);
+    assert.strictEqual(await vibe.evaluate(() => document.title), 'Example Domain');
+    assert.strictEqual(await vibe.evaluate(() => typeof document.body), 'object');
   });
 
   test('addScript() injects inline JS', async () => {
