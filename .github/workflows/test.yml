@@ -115,7 +115,12 @@ jobs:
   #   suite_parallel  — the macOS runner has 3 cores and 7 GB against Linux's
   #                     4 and 16, and renders Chrome in software; 4-way suite
   #                     parallelism intermittently starved it into scattered
-  #                     30s test timeouts (run 38786751399)
+  #                     30s test timeouts (run 38786751399). 2-way still ran
+  #                     the JS suite against two pytest-xdist Chromes and kept
+  #                     timing out the same way, with a renderer killed under
+  #                     memory pressure in the second run ("Browsing context
+  #                     is gone", runs 39296069220 and 39360774147), so macOS
+  #                     runs suites serially.
   # Windows is not in the matrix yet: its legs need Go test fixes (Unix file
   # modes, XDG, path separators), Python client binary discovery for
   # vibium.exe, and a story for Firefox auto-install, which the binary
@@ -140,7 +145,7 @@ jobs:
             rollup_native: '@rollup/rollup-darwin-arm64'
             python_version: '3.13'
             go_version: stable
-            suite_parallel: 2
+            suite_parallel: 1
     runs-on: ${{ matrix.os }}
     # Backstop only — scripts/timeout.mjs fails a hung suite after 10 min.
     timeout-minutes: 30
