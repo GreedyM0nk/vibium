@@ -224,9 +224,10 @@ jobs:
       # per test now, not per file, so the Makefile's 30s default applies and a
       # hung ordinary test surfaces in 30s.
       #
-      # test-core is everything except the Check and Run suites, which run on
-      # their own runner in chrome-checks (#513). Locally `make test` is
-      # still the whole suite.
+      # test-core is everything except the Check and Run suites (#513) and
+      # the serial tail (browser-modes, firefox, daemon, js-sync), which both
+      # run on the chrome-checks runner. Locally `make test` is still the
+      # whole suite.
       - name: Test
         run: ${{ matrix.display_wrap }} make test-core SUITE_PARALLEL=${{ matrix.suite_parallel }}
 
@@ -239,8 +240,11 @@ jobs:
         run: make double-tap
 
   # The Check and Run suites on the default engine, split from the chrome
-  # job so its wall time stays near the pre-#484 suite's (#513). Not a
-  # required check by name: the test gate below fails unless this passes.
+  # job so its wall time stays near the pre-#484 suite's (#513), plus the
+  # chrome job's serial tail (browser-modes, firefox, daemon, js-sync): the
+  # tail is serial by nature, so it shortens the chrome leg by its full
+  # length and roughly balances the two legs. Not a required check by name:
+  # the test gate below fails unless this passes.
   chrome-checks:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -322,8 +326,11 @@ jobs:
       - name: Build
         run: make
 
-      - name: Test Check and Run
-        run: ${{ matrix.display_wrap }} make test-checkrun
+      # One make invocation so the build prerequisites run once. test-firefox
+      # behaves here exactly as it did in the chrome job: no Firefox is
+      # installed, so it skips, and the firefox job still runs it for real.
+      - name: Test Check, Run and the serial tail
+        run: ${{ matrix.display_wrap }} make test-checkrun test-tail
 
       - name: Clean up zombie processes
         if: always()
