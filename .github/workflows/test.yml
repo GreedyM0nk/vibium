@@ -105,9 +105,12 @@ jobs:
   #                     so each leg installs its own rollup module explicitly
   #   display_wrap    — the Python suite's headed tests need a display; only
   #                     Linux runners lack one, so only Linux wraps in xvfb
-  #   python_version  — setup-python has no 3.9 build for Apple Silicon, so
-  #                     macOS tests a current Python while Linux holds the
-  #                     3.9 floor
+  #   python_version  — Linux holds the client's requires-python floor so a
+  #                     change cannot lean on features newer than the oldest
+  #                     Python we ship to; macOS tests a current Python,
+  #                     covering the other end of the supported range. The
+  #                     floor tracks CPython's security-fix window (see the
+  #                     support policy in CONTRIBUTING.md)
   #   go_version      — Go emits the LC_UUID load command only from 1.23, and
   #                     the macOS 26 runner's dyld aborts binaries without it,
   #                     so macOS builds with current Go while Linux holds the
@@ -144,7 +147,7 @@ jobs:
             cache_root: ~/.cache/vibium
             rollup_native: '@rollup/rollup-linux-x64-gnu'
             display_wrap: xvfb-run --auto-servernum
-            python_version: '3.9'
+            python_version: '3.11'
             suite_parallel: 4
           - os: macos-latest
             runner: [self-hosted, macOS, ARM64]
@@ -270,7 +273,7 @@ jobs:
             cache_root: ~/.cache/vibium
             rollup_native: '@rollup/rollup-linux-x64-gnu'
             display_wrap: xvfb-run --auto-servernum
-            python_version: '3.9'
+            python_version: '3.11'
           - os: macos-latest
             runner: [self-hosted, macOS, ARM64]
             cache_root: ~/Library/Caches/vibium
@@ -363,7 +366,7 @@ jobs:
             cache_root: ~/.cache/vibium
             rollup_native: '@rollup/rollup-linux-x64-gnu'
             display_wrap: xvfb-run --auto-servernum
-            python_version: '3.9'
+            python_version: '3.11'
           - os: macos-latest
             runner: [self-hosted, macOS, ARM64]
             cache_root: ~/Library/Caches/vibium
@@ -474,7 +477,7 @@ jobs:
             cache_root: ~/.cache/vibium
             rollup_native: '@rollup/rollup-linux-x64-gnu'
             display_wrap: xvfb-run --auto-servernum
-            python_version: '3.9'
+            python_version: '3.11'
           - os: macos-latest
             runner: [self-hosted, macOS, ARM64]
             cache_root: ~/Library/Caches/vibium
