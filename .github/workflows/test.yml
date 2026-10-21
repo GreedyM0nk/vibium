@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Merge queue batches. Without this the queue waits forever for the
+  # required `test` check. The changes classifier treats merge_group like a
+  # push: full suite, no docs-only skip.
+  merge_group:
 
 # Deliberately no paths/paths-ignore. Branch protection requires the checks
 # this workflow reports, and a filter that skips the workflow also skips the
