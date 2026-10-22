@@ -191,6 +191,12 @@ func resolveVersionDir(channel string) (string, error) {
 		if _, err := os.Stat(getChromedriverPathInVersion(dir)); err != nil {
 			return "", err
 		}
+		// A cached pin of the wrong architecture would launch into "exec
+		// format error"; reject it so ensure-install downloads the right
+		// build over it (#699).
+		if !binaryArchMatches(getChromePathInVersion(dir)) || !binaryArchMatches(getChromedriverPathInVersion(dir)) {
+			return "", os.ErrNotExist
+		}
 		return dir, nil
 	}
 
@@ -209,6 +215,11 @@ func resolveVersionDir(channel string) (string, error) {
 			continue
 		}
 		if _, err := os.Stat(getChromedriverPathInVersion(dir)); err != nil {
+			continue
+		}
+		// Skip a cached dir whose binaries are the wrong architecture; it
+		// would only launch into "exec format error" (#699).
+		if !binaryArchMatches(getChromePathInVersion(dir)) || !binaryArchMatches(getChromedriverPathInVersion(dir)) {
 			continue
 		}
 		complete = append(complete, entry.Name())
