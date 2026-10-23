@@ -59,9 +59,9 @@ func TestBinaryArchMatches(t *testing.T) {
 	}
 }
 
-// A cached pin whose binaries are the wrong architecture must be rejected so
-// ensure-install downloads the right build over it instead of launching into
-// "exec format error" (#699).
+// A cached pin whose binaries are the wrong architecture must be rejected
+// and deleted so ensure-install downloads the right build instead of
+// launching into "exec format error" (#699).
 func TestResolveVersionDirRejectsWrongArch(t *testing.T) {
 	cache := t.TempDir()
 	t.Setenv("VIBIUM_CACHE_DIR", cache)
@@ -76,10 +76,43 @@ func TestResolveVersionDirRejectsWrongArch(t *testing.T) {
 		t.Error("resolveVersionDir() with a wrong-arch cached pin: want error, got nil")
 	}
 
+	// The rejected directory is deleted so the reinstall extracts into a
+	// clean directory instead of over the old files.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("wrong-arch version dir should be deleted, Stat() err = %v", err)
+	}
+
 	// Rebuilt for the host arch, the same pin resolves.
 	buildTinyBinary(t, runtime.GOARCH, getChromePathInVersion(dir))
 	buildTinyBinary(t, runtime.GOARCH, getChromedriverPathInVersion(dir))
 	if _, err := resolveVersionDir(""); err != nil {
 		t.Errorf("resolveVersionDir() with a host-arch cached pin: %v", err)
+	}
+}
+
+// Newest-cached selection (moving channels) must skip a wrong-architecture
+// directory rather than resolve it, even when it carries the highest version.
+func TestResolveVersionDirNewestSkipsWrongArch(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("VIBIUM_CACHE_DIR", cache)
+	t.Setenv("VIBIUM_ENGINE_CHANNEL", "beta")
+	t.Setenv("VIBIUM_ENGINE_VERSION", "")
+
+	good := filepath.Join(cache, "chrome-for-testing", "beta", "100.0.0.1")
+	buildTinyBinary(t, runtime.GOARCH, getChromePathInVersion(good))
+	buildTinyBinary(t, runtime.GOARCH, getChromedriverPathInVersion(good))
+	bad := filepath.Join(cache, "chrome-for-testing", "beta", "999.0.0.0")
+	buildTinyBinary(t, foreignArch(), getChromePathInVersion(bad))
+	buildTinyBinary(t, foreignArch(), getChromedriverPathInVersion(bad))
+
+	dir, err := resolveVersionDir("beta")
+	if err != nil {
+		t.Fatalf("resolveVersionDir(beta) error = %v", err)
+	}
+	if got := filepath.Base(dir); got != "100.0.0.1" {
+		t.Errorf("resolveVersionDir(beta) = %s, want the host-arch 100.0.0.1", got)
+	}
+	if _, err := os.Stat(bad); !os.IsNotExist(err) {
+		t.Errorf("wrong-arch version dir should be deleted, Stat() err = %v", err)
 	}
 }

@@ -13,7 +13,7 @@ import (
 // release's npm postinstall downloads on arm64) passes the stat-based install
 // check and then dies at launch with "exec format error" (#699). Treating a
 // mismatch as not-installed lets the ensure-install path download the right
-// build over it.
+// build (resolveVersionDir deletes the rejected directory first).
 //
 // A file that cannot be parsed as the platform's executable format is treated
 // as matching: the stat checks already gate existence, and a parser quirk must
