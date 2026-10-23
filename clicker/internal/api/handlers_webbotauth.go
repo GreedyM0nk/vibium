@@ -68,15 +68,19 @@ func (r *Router) signAndContinue(session *BrowserSession, raw string) {
 		"request": reqID,
 		"headers": merged,
 	}); err != nil {
-		// The signed continue failed; try once unsigned so the page still
-		// loads. If the request was already continued, this is a harmless
-		// no-op that errors and is ignored.
+		// The signed continue failed; say so and try once unsigned so the
+		// page still loads.
+		fmt.Fprintf(os.Stderr, "[router] web-bot-auth: signed continue failed, retrying unsigned: %v\n", err)
 		r.continueUnsigned(session, reqID)
 	}
 }
 
 func (r *Router) continueUnsigned(session *BrowserSession, reqID string) {
-	r.sendInternalCommand(session, "network.continueRequest", map[string]interface{}{"request": reqID})
+	if _, err := r.sendInternalCommand(session, "network.continueRequest", map[string]interface{}{"request": reqID}); err != nil {
+		// A request that cannot be continued at all stays blocked and hangs
+		// its fetch; this line is the only trace of why.
+		fmt.Fprintf(os.Stderr, "[router] web-bot-auth: request %s could not be continued: %v\n", reqID, err)
+	}
 }
 
 // signatureHeaders builds the BiDi header entries for one request URL, or

@@ -38,6 +38,11 @@ Enroll that host with Cloudflare's Verified Bots program so participating sites
 can choose to allow it. Signing works without enrollment, but only enrolled,
 allowed bots are let through.
 
+Note that the draft expects the directory *response* to be signed with the
+same key, which a static file host cannot do. A plain JWKS file may be enough
+to get enrolled today, but if enrollment or verification rejects your
+directory, that response signature is the first thing to check.
+
 ## 3. Run Vibium with signing on
 
 Point `VIBIUM_WEB_BOT_AUTH_KEY` at the key, and set
@@ -62,6 +67,8 @@ not being signed.
   stack.
 - A session that signs cannot also use `page.route`: signing owns the request
   intercept, and a client route would race its continue. Use one or the other
-  per session.
+  per session. The same applies to calling `network.addIntercept` directly
+  over raw BiDi: a second intercept races the signer's continue and is not
+  guarded the way `page.route` is.
 - Signatures carry a short validity window and a per-request nonce to limit
   replay. The authority signed is the request URL host.
